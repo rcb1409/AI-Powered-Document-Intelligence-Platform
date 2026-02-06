@@ -15,7 +15,7 @@ export interface Document {
     user_id: number;
     filename: string;
     file_url: string;
-    file_size: number;
+    file_size_bytes: number;
     uploaded_at: Date;
   }  
 

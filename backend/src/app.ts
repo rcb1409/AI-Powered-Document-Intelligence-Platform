@@ -5,6 +5,7 @@ import { testConnection } from "./config/database";
 import { testGroqConnection } from "./config/groq";
 import { testHuggingFaceConnection } from "./config/embeddings";
 import path from "path";
+import documentsRoutes from "./routes/documents";
 
 const app = express();
 
@@ -12,7 +13,7 @@ app.use(cors());
 app.use(helmet());
 app.use(express.json());
 app.use("/uploads", express.static(path.resolve(__dirname, "../../uploads")));
-
+app.use("/api/documents", documentsRoutes);
 app.get("/health", (_req, res) => {
     res.json({status: "ok"})
 });

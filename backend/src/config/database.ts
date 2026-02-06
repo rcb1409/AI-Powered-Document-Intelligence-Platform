@@ -23,8 +23,8 @@ export const testConnection = async (): Promise<boolean> => {
 
 export const initPgVector = async (): Promise<void> => {
     try{
-        const result = await pool.query("CREATE EXTENSION IF NOT EXISTS vector");
-        console.log("pgVector extension created", result.rows[0].now);
+        await pool.query("CREATE EXTENSION IF NOT EXISTS vector");
+        console.log("pgVector extension enabled");
     } catch (error) {
         console.error("pgVector extension creation failed", error);
     }
