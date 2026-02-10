@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { upload } from "../middleware/upload";
+import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import { saveMulterFile } from "../config/storage";
 import { extractTextFromPDF } from "../services/pdfService";
 import { chunkText } from "../utils/textChunker";
@@ -26,16 +27,20 @@ const router = Router();
  */
 router.post(
   "/upload",
-  upload.single("file"), // Multer middleware: req.file will be set
-  async (req: Request, res: Response) => {
+  authMiddleware,          // require JWT
+  upload.single("file"),   // Multer middleware: req.file will be set
+  async (req: AuthenticatedRequest, res: Response) => {
     try {
       // 1) Ensure file is present
       if (!req.file) {
         return res.status(400).json({ success: false, error: "No file uploaded" });
       }
 
-      // For MVP: hardcode userId = 1
-      const userId = 1;
+      // Get user id from auth middleware
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: "Not authenticated" });
+      }
 
       // 2) Save file to disk (returns URL path & metadata)
       const stored = saveMulterFile(req.file);
@@ -113,11 +118,14 @@ router.post(
 
 /**
  * GET /api/documents
- * List documents for the current user (MVP: userId = 1)
+ * List documents for the current user
  */
-router.get("/", async (req: Request, res: Response) => {
+router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = 1; // TODO: replace with real auth later
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
     const documents = await getUserDocuments(userId);
 
     return res.json({
@@ -137,9 +145,12 @@ router.get("/", async (req: Request, res: Response) => {
  * DELETE /api/documents/:id
  * Delete a document and its chunks (and chat_history via CASCADE)
  */
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = 1; // TODO: replace with real auth later
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
     const documentId = Number(req.params.id);
 
     if (!documentId || Number.isNaN(documentId)) {

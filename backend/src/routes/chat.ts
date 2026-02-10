@@ -3,6 +3,7 @@ import { generateEmbedding } from "../config/embeddings";
 import { getTopChunksForQuestion } from "../services/documentService";
 import { answerQuestion } from "../services/aiService";
 import pool from "../config/database";
+import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 
 const router = Router();
 
@@ -14,7 +15,7 @@ const router = Router();
  * Request body: { documentId: number, question: string }
  * Response: { answer: string, relevantChunks: string[] }
  */
-router.post("/ask", async (req: Request, res: Response) => {
+router.post("/ask", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { documentId, question } = req.body;
 
@@ -33,8 +34,11 @@ router.post("/ask", async (req: Request, res: Response) => {
       });
     }
 
-    // For MVP: hardcode userId = 1
-    const userId = 1;
+    // Get user id from auth middleware
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
 
     // Step 1: Generate embedding for the question
     console.log("Generating question embedding...");
@@ -89,9 +93,12 @@ router.post("/ask", async (req: Request, res: Response) => {
  * GET /api/chat/:documentId
  * Get chat history for a specific document
  */
-router.get("/:documentId", async (req: Request, res: Response) => {
+router.get("/:documentId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = 1; // TODO: replace with real auth later
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
     const documentId = Number(req.params.documentId);
 
     if (!documentId || Number.isNaN(documentId)) {
