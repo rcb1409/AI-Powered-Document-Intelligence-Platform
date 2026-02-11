@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { generateEmbedding } from "../config/embeddings";
-import { getTopChunksForQuestion } from "../services/documentService";
+import { getTopChunksForWorkspaceQuestion } from "../services/documentService";
 import { answerQuestion } from "../services/aiService";
 import pool from "../config/database";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
@@ -8,22 +8,22 @@ import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 const router = Router();
 
 /**
- * POST /api/chat/ask
+ * POST /api/chat/workspace/ask
  * 
- * Ask a question about a document using RAG.
+ * Ask a question about documents in a workspace using RAG.
  * 
- * Request body: { documentId: number, question: string }
+ * Request body: { workspaceId: number, question: string }
  * Response: { answer: string, relevantChunks: string[] }
  */
-router.post("/ask", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.post("/workspace/ask", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { documentId, question } = req.body;
+    const { workspaceId, question } = req.body;
 
     // Validate input
-    if (!documentId || !question) {
+    if (!workspaceId || !question) {
       return res.status(400).json({
         success: false,
-        error: "documentId and question are required",
+        error: "workspaceId and question are required",
       });
     }
 
@@ -45,10 +45,11 @@ router.post("/ask", authMiddleware, async (req: AuthenticatedRequest, res: Respo
     const questionEmbedding = await generateEmbedding(question.trim());
     console.log("Question embedding generated, dimensions:", questionEmbedding.length);
 
-    // Step 2: Find most similar chunks using vector search
-    console.log("Searching for similar chunks...");
-    const relevantChunks = await getTopChunksForQuestion(
-      documentId,
+    // Step 2: Find most similar chunks using vector search across workspace
+    console.log("Searching for similar chunks in workspace...");
+    const relevantChunks = await getTopChunksForWorkspaceQuestion(
+      workspaceId,
+      userId,
       questionEmbedding,
       5 // Get top 5 most similar chunks
     );
@@ -57,7 +58,7 @@ router.post("/ask", authMiddleware, async (req: AuthenticatedRequest, res: Respo
     if (relevantChunks.length === 0) {
       return res.status(404).json({
         success: false,
-        error: "No relevant content found in the document for this question",
+        error: "No relevant content found in the workspace for this question",
       });
     }
 
@@ -66,11 +67,11 @@ router.post("/ask", authMiddleware, async (req: AuthenticatedRequest, res: Respo
     const answer = await answerQuestion(question, relevantChunks);
     console.log("Answer generated");
 
-    // Step 4: Save to chat history
+    // Step 4: Save to chat history (linked to workspace, not document)
     await pool.query(
-      `INSERT INTO chat_history (user_id, document_id, question, answer)
+      `INSERT INTO chat_history (user_id, workspace_id, question, answer)
        VALUES ($1, $2, $3, $4)`,
-      [userId, documentId, question, answer]
+      [userId, workspaceId, question, answer]
     );
 
     // Step 5: Return response
@@ -78,10 +79,10 @@ router.post("/ask", authMiddleware, async (req: AuthenticatedRequest, res: Respo
       success: true,
       answer,
       relevantChunks: relevantChunks.slice(0, 3), // Return first 3 chunks for reference
-      documentId,
+      workspaceId,
     });
   } catch (error: any) {
-    console.error("Error in POST /api/chat/ask:", error);
+    console.error("Error in POST /api/chat/workspace/ask:", error);
     return res.status(500).json({
       success: false,
       error: error?.message || "Failed to process question",
@@ -90,30 +91,42 @@ router.post("/ask", authMiddleware, async (req: AuthenticatedRequest, res: Respo
 });
 
 /**
- * GET /api/chat/:documentId
- * Get chat history for a specific document
+ * GET /api/chat/workspace/:workspaceId
+ * Get chat history for a specific workspace
  */
-router.get("/:documentId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+router.get("/workspace/:workspaceId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.userId;
     if (!userId) {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
-    const documentId = Number(req.params.documentId);
+    const workspaceId = Number(req.params.workspaceId);
 
-    if (!documentId || Number.isNaN(documentId)) {
+    if (!workspaceId || Number.isNaN(workspaceId)) {
       return res.status(400).json({
         success: false,
-        error: "Invalid document id",
+        error: "Invalid workspace id",
+      });
+    }
+
+    // Verify workspace belongs to user
+    const wsCheck = await pool.query(
+      `SELECT id FROM workspaces WHERE id = $1 AND user_id = $2`,
+      [workspaceId, userId]
+    );
+    if (wsCheck.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Workspace not found",
       });
     }
 
     const result = await pool.query(
       `SELECT id, question, answer, created_at
        FROM chat_history
-       WHERE user_id = $1 AND document_id = $2
+       WHERE user_id = $1 AND workspace_id = $2
        ORDER BY created_at DESC`,
-      [userId, documentId]
+      [userId, workspaceId]
     );
 
     return res.json({
@@ -121,7 +134,7 @@ router.get("/:documentId", authMiddleware, async (req: AuthenticatedRequest, res
       history: result.rows,
     });
   } catch (error: any) {
-    console.error("Error in GET /api/chat/:documentId:", error);
+    console.error("Error in GET /api/chat/workspace/:workspaceId:", error);
     return res.status(500).json({
       success: false,
       error: error?.message || "Failed to fetch chat history",

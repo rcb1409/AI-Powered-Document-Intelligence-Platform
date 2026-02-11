@@ -8,6 +8,7 @@ import path from "path";
 import documentsRoutes from "./routes/documents";
 import chatRoutes from "./routes/chat";
 import authRoutes from "./routes/auth";
+import workspacesRoutes from "./routes/workspaces";
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use("/uploads", express.static(path.resolve(__dirname, "../../uploads")));
 app.use("/api/documents", documentsRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/workspaces", workspacesRoutes);
 app.get("/health", (_req, res) => {
     res.json({status: "ok"})
 });

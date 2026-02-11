@@ -1,24 +1,7 @@
 import pool from "../config/database";
 import { Document } from "../types";
 
-export async function createDocument(
-    userId: number,
-    filename: string,
-    fileUrl: string,
-    fileSizeBytes: number
-  ): Promise<Document> {
-    const result = await pool.query(
-      `INSERT INTO documents (user_id, filename, file_url, file_size_bytes)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, user_id, filename, file_url, file_size_bytes as file_size, uploaded_at`,
-      [userId, filename, fileUrl, fileSizeBytes]
-    );
-  
-    // We cast the row to your Document interface
-    return result.rows[0] as Document;
-  }
-
-  export async function saveDocumentChunks(
+export async function saveDocumentChunks(
     documentId: number,
     chunks: string[],
     embeddings: number[][]
@@ -43,70 +26,135 @@ export async function createDocument(
       );
     }
   
-    return chunks.length;
+  return chunks.length;
+}
+
+/**
+ * Create a document within a workspace
+ */
+export async function createDocumentInWorkspace(
+  userId: number,
+  workspaceId: number,
+  filename: string,
+  fileUrl: string,
+  fileSizeBytes: number
+): Promise<Document> {
+  // Verify workspace belongs to user
+  const wsCheck = await pool.query(
+    `SELECT id FROM workspaces WHERE id = $1 AND user_id = $2`,
+    [workspaceId, userId]
+  );
+  if (wsCheck.rowCount === 0) {
+    throw new Error("Workspace not found or access denied");
   }
 
-  export async function getUserDocuments(userId: number): Promise<Document[]> {
-    const result = await pool.query(
-      `SELECT
-         id,
-         user_id,
-         filename,
-         file_url,
-         file_size_bytes as file_size,
-         uploaded_at
-       FROM documents
-       WHERE user_id = $1
-       ORDER BY uploaded_at DESC`,
-      [userId]
-    );
-  
-    return result.rows as Document[];
+  const result = await pool.query(
+    `INSERT INTO documents (user_id, workspace_id, filename, file_url, file_size_bytes)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, user_id, filename, file_url, file_size_bytes as file_size, uploaded_at`,
+    [userId, workspaceId, filename, fileUrl, fileSizeBytes]
+  );
+
+  return result.rows[0] as Document;
+}
+
+/**
+ * Get all documents in a workspace (for a user)
+ */
+export async function getWorkspaceDocuments(
+  userId: number,
+  workspaceId: number
+): Promise<Document[]> {
+  // Verify workspace belongs to user
+  const wsCheck = await pool.query(
+    `SELECT id FROM workspaces WHERE id = $1 AND user_id = $2`,
+    [workspaceId, userId]
+  );
+  if (wsCheck.rowCount === 0) {
+    throw new Error("Workspace not found or access denied");
   }
-  
-  export async function deleteDocument(
-    documentId: number,
-    userId: number
-  ): Promise<void> {
-    // Ensure the document belongs to this user
-    const docResult = await pool.query(
-      `SELECT id FROM documents WHERE id = $1 AND user_id = $2`,
-      [documentId, userId]
-    );
-  
-    if (docResult.rows.length === 0) {
-      throw new Error("Document not found or access denied");
-    }
-  
-    // Due to ON DELETE CASCADE on document_chunks.document_id,
-    // deleting the document will also delete its chunks.
-    await pool.query(
-      `DELETE FROM documents WHERE id = $1`,
-      [documentId]
-    );}
 
+  const result = await pool.query(
+    `SELECT
+       id,
+       user_id,
+       filename,
+       file_url,
+       file_size_bytes as file_size,
+       uploaded_at
+     FROM documents
+     WHERE user_id = $1 AND workspace_id = $2
+     ORDER BY uploaded_at DESC`,
+    [userId, workspaceId]
+  );
 
-export async function getTopChunksForQuestion(
-        documentId: number,
-        questionEmbedding: number[],
-        limit: number = 5
-      ): Promise<string[]> {
-        // Convert embedding array to pgvector format: [0.1,0.2,0.3,...]
-        const embeddingLiteral = `[${questionEmbedding.join(",")}]`;
-      
-        // pgvector uses <=> operator for cosine distance
-        // Smaller distance = more similar
-        // ORDER BY embedding <=> $2::vector sorts by similarity (ascending = most similar first)
-        const result = await pool.query(
-          `SELECT chunk_text
-           FROM document_chunks
-           WHERE document_id = $1
-           ORDER BY embedding <=> $2::vector
-           LIMIT $3`,
-          [documentId, embeddingLiteral, limit]
-        );
-      
-        // Return just the text of each chunk (in order of similarity)
-        return result.rows.map((row) => row.chunk_text);
-    }
-  
+  return result.rows as Document[];
+}
+
+/**
+ * Delete a document from a workspace
+ */
+export async function deleteDocumentFromWorkspace(
+  documentId: number,
+  userId: number,
+  workspaceId: number
+): Promise<void> {
+  // Verify workspace belongs to user
+  const wsCheck = await pool.query(
+    `SELECT id FROM workspaces WHERE id = $1 AND user_id = $2`,
+    [workspaceId, userId]
+  );
+  if (wsCheck.rowCount === 0) {
+    throw new Error("Workspace not found or access denied");
+  }
+
+  // Ensure document belongs to user + workspace
+  const docResult = await pool.query(
+    `SELECT id FROM documents
+     WHERE id = $1 AND user_id = $2 AND workspace_id = $3`,
+    [documentId, userId, workspaceId]
+  );
+
+  if (docResult.rows.length === 0) {
+    throw new Error("Document not found or access denied");
+  }
+
+  await pool.query(
+    `DELETE FROM documents WHERE id = $1`,
+    [documentId]
+  );
+}
+
+/**
+ * Get top chunks from all documents in a workspace (for RAG)
+ */
+export async function getTopChunksForWorkspaceQuestion(
+  workspaceId: number,
+  userId: number,
+  questionEmbedding: number[],
+  limit: number = 5
+): Promise<string[]> {
+  // Verify workspace belongs to user
+  const wsCheck = await pool.query(
+    `SELECT id FROM workspaces WHERE id = $1 AND user_id = $2`,
+    [workspaceId, userId]
+  );
+  if (wsCheck.rowCount === 0) {
+    throw new Error("Workspace not found or access denied");
+  }
+
+  const embeddingLiteral = `[${questionEmbedding.join(",")}]`;
+
+  // Search across all chunks from documents in this workspace
+  const result = await pool.query(
+    `SELECT dc.chunk_text
+     FROM document_chunks dc
+     JOIN documents d ON d.id = dc.document_id
+     WHERE d.workspace_id = $1 AND d.user_id = $2
+     ORDER BY dc.embedding <=> $3::vector
+     LIMIT $4`,
+    [workspaceId, userId, embeddingLiteral, limit]
+  );
+
+  return result.rows.map((row) => row.chunk_text);
+}

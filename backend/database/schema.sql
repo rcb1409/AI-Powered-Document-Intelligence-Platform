@@ -1,5 +1,14 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 
+CREATE TABLE IF NOT EXISTS workspaces (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspaces_user_id ON workspaces(user_id);
+
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
@@ -7,9 +16,11 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+
 CREATE TABLE IF NOT EXISTS documents (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workspace_id INTEGER REFERENCES workspaces(id) ON DELETE CASCADE,
   filename TEXT NOT NULL,
   file_url TEXT NOT NULL,
   file_size_bytes INTEGER,
@@ -17,6 +28,7 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);
+CREATE INDEX IF NOT EXISTS idx_documents_workspace_id ON documents(workspace_id);
 
 CREATE TABLE IF NOT EXISTS document_chunks (
   id SERIAL PRIMARY KEY,
@@ -36,12 +48,15 @@ CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON document_chunks(document_id
 CREATE INDEX IF NOT EXISTS idx_chunks_embedding
   ON document_chunks USING ivfflat (embedding vector_cosine_ops);
 
+
 CREATE TABLE IF NOT EXISTS chat_history (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
   question TEXT NOT NULL,
   answer TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_chat_user_doc ON chat_history(user_id, document_id);
+
+CREATE INDEX IF NOT EXISTS idx_chat_user_ws ON chat_history(user_id, workspace_id);

@@ -6,17 +6,53 @@ import { extractTextFromPDF } from "../services/pdfService";
 import { chunkText } from "../utils/textChunker";
 import { generateEmbeddings } from "../config/embeddings";
 import {
-  createDocument,
+  createDocumentInWorkspace,
   saveDocumentChunks,
-  getUserDocuments,
-  deleteDocument,
+  getWorkspaceDocuments,
+  deleteDocumentFromWorkspace,
 } from "../services/documentService";
 
 const router = Router();
 
 /**
- * POST /api/documents/upload
+ * GET /api/documents/workspace/:workspaceId
+ * List documents in a workspace
+ */
+router.get(
+  "/workspace/:workspaceId",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: "Not authenticated" });
+      }
+
+      const workspaceId = Number(req.params.workspaceId);
+      if (!workspaceId || Number.isNaN(workspaceId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid workspace id",
+        });
+      }
+
+      const documents = await getWorkspaceDocuments(userId, workspaceId);
+
+      return res.json({ success: true, documents });
+    } catch (error: any) {
+      console.error("Error in GET /api/documents/workspace/:workspaceId:", error);
+      return res.status(500).json({
+        success: false,
+        error: error?.message || "Failed to fetch documents",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/documents/workspace/:workspaceId/upload
  * 
+ * Upload document into a workspace.
  * Flow:
  * 1) Receive PDF file via multipart/form-data (field name: "file")
  * 2) Save file to local storage (uploads/)
@@ -26,27 +62,33 @@ const router = Router();
  * 6) Save document + chunks (with embeddings) to the database
  */
 router.post(
-  "/upload",
-  authMiddleware,          // require JWT
-  upload.single("file"),   // Multer middleware: req.file will be set
+  "/workspace/:workspaceId/upload",
+  authMiddleware,
+  upload.single("file"),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
-      // 1) Ensure file is present
       if (!req.file) {
         return res.status(400).json({ success: false, error: "No file uploaded" });
       }
 
-      // Get user id from auth middleware
       const userId = req.userId;
       if (!userId) {
         return res.status(401).json({ success: false, error: "Not authenticated" });
       }
 
-      // 2) Save file to disk (returns URL path & metadata)
+      const workspaceId = Number(req.params.workspaceId);
+      if (!workspaceId || Number.isNaN(workspaceId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid workspace id",
+        });
+      }
+
+      // Save file
       const stored = saveMulterFile(req.file);
       console.log("Saved file to:", stored.urlPath);
 
-      // 3) Extract text from PDF bytes
+      // Extract text
       const text = await extractTextFromPDF(req.file.buffer);
       console.log("Extracted text length:", text.length);
 
@@ -57,7 +99,7 @@ router.post(
         });
       }
 
-      // 4) Chunk the text
+      // Chunk
       const chunks = chunkText(text, {
         maxChars: 1000,
         overlapChars: 200,
@@ -71,12 +113,11 @@ router.post(
         });
       }
 
-      // 5) Generate embeddings for each chunk (Hugging Face)
+      // Generate embeddings
       console.log("Generating embeddings for chunks...");
       const embeddings = await generateEmbeddings(chunks);
       console.log("Embeddings generated for", embeddings.length, "chunks");
 
-      // Safety: ensure counts match
       if (embeddings.length !== chunks.length) {
         return res.status(500).json({
           success: false,
@@ -84,20 +125,20 @@ router.post(
         });
       }
 
-      // 6) Save document metadata to DB
-      const doc = await createDocument(
+      // Create document in workspace (service handles workspace validation)
+      const doc = await createDocumentInWorkspace(
         userId,
+        workspaceId,
         req.file.originalname,
         stored.urlPath,
         req.file.size
       );
       console.log("Created document with id:", doc.id);
 
-      // 7) Save chunks + embeddings to DB
+      // Save chunks
       const chunksSaved = await saveDocumentChunks(doc.id, chunks, embeddings);
       console.log("Saved", chunksSaved, "chunks for document", doc.id);
 
-      // 8) Respond to client
       return res.json({
         success: true,
         documentId: doc.id,
@@ -107,7 +148,7 @@ router.post(
         message: "Document uploaded and processed successfully",
       });
     } catch (error: any) {
-      console.error("Error in /api/documents/upload:", error);
+      console.error("Error in POST /api/documents/workspace/:workspaceId/upload:", error);
       return res.status(500).json({
         success: false,
         error: error?.message || "Failed to process document",
@@ -117,62 +158,44 @@ router.post(
 );
 
 /**
- * GET /api/documents
- * List documents for the current user
+ * DELETE /api/documents/workspace/:workspaceId/:documentId
+ * Delete document from workspace
  */
-router.get("/", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const userId = req.userId;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: "Not authenticated" });
-    }
-    const documents = await getUserDocuments(userId);
+router.delete(
+  "/workspace/:workspaceId/:documentId",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.userId;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: "Not authenticated" });
+      }
 
-    return res.json({
-      success: true,
-      documents,
-    });
-  } catch (error: any) {
-    console.error("Error in GET /api/documents:", error);
-    return res.status(500).json({
-      success: false,
-      error: error?.message || "Failed to fetch documents",
-    });
-  }
-});
+      const workspaceId = Number(req.params.workspaceId);
+      const documentId = Number(req.params.documentId);
 
-/**
- * DELETE /api/documents/:id
- * Delete a document and its chunks (and chat_history via CASCADE)
- */
-router.delete("/:id", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const userId = req.userId;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: "Not authenticated" });
-    }
-    const documentId = Number(req.params.id);
+      if (!workspaceId || Number.isNaN(workspaceId) ||
+          !documentId || Number.isNaN(documentId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid workspace or document id",
+        });
+      }
 
-    if (!documentId || Number.isNaN(documentId)) {
-      return res.status(400).json({
+      await deleteDocumentFromWorkspace(documentId, userId, workspaceId);
+
+      return res.json({
+        success: true,
+        message: "Document deleted successfully",
+      });
+    } catch (error: any) {
+      console.error("Error in DELETE /api/documents/workspace/:workspaceId/:documentId:", error);
+      return res.status(500).json({
         success: false,
-        error: "Invalid document id",
+        error: error?.message || "Failed to delete document",
       });
     }
-
-    await deleteDocument(documentId, userId);
-
-    return res.json({
-      success: true,
-      message: "Document deleted successfully",
-    });
-  } catch (error: any) {
-    console.error("Error in DELETE /api/documents/:id:", error);
-    return res.status(500).json({
-      success: false,
-      error: error?.message || "Failed to delete document",
-    });
   }
-});
+);
 
 export default router;

@@ -37,9 +37,9 @@ export default function RegisterPage() {
         throw new Error(data.error || "Registration failed");
       }
 
-      // Save token and go to documents page
+      // Save token and go to workspaces page
       setToken(data.token);
-      router.push("/documents");
+      router.push("/workspaces");
     } catch (err: any) {
       setError(err.message || "Registration failed");
     } finally {

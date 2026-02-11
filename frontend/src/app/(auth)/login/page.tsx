@@ -32,9 +32,9 @@ export default function LoginPage() {
         throw new Error(data.error || "Login failed");
       }
 
-      // Save token and go to documents page
+      // Save token and go to workspaces page
       setToken(data.token);
-      router.push("/documents");
+      router.push("/workspaces");
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {
