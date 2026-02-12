@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { setToken } from "@/lib/auth";
+import { setToken, getToken } from "@/lib/auth";
+import ErrorBanner from "@/components/ui/ErrorBanner";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
@@ -13,6 +14,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const token = getToken();
+    if (token) {
+      router.replace("/workspaces");
+    }
+  }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,7 +56,7 @@ export default function LoginPage() {
         <h1 className="text-2xl font-semibold text-center">Login</h1>
 
         {error && (
-          <p className="text-sm text-red-600 text-center">{error}</p>
+          <ErrorBanner message={error} />
         )}
 
         <form className="space-y-4" onSubmit={handleSubmit}>

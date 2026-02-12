@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { getToken, clearToken } from "@/lib/auth";
 import { FileText, Trash2, MessageSquare, Plus, NotebookPen, LogOut } from "lucide-react";
+import ErrorBanner from "@/components/ui/ErrorBanner";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 
 type Workspace = {
   id: number;
@@ -33,6 +35,30 @@ export default function WorkspacesPage() {
     loadWorkspaces();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  
+
+  async function handleQuickCreate() {
+    setError(null);
+    setCreating(true);
+    try {
+      const data = await apiFetch("/api/workspaces", {
+        method: "POST",
+        body: JSON.stringify({ name: "Untitled" }), // or "Untitled workspace"
+      });
+  
+      if (!data.success || !data.workspace?.id) {
+        throw new Error(data.error || "Failed to create workspace");
+      }
+  
+      // Go straight to the new workspace page
+      router.push(`/workspaces/${data.workspace.id}`);
+    } catch (err: any) {
+      setError(err.message || "Failed to create workspace");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function loadWorkspaces() {
     setError(null);
@@ -111,7 +137,7 @@ export default function WorkspacesPage() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowCreateForm(true)}
+            onClick={handleQuickCreate}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-full font-medium transition-all shadow-sm active:scale-95"
             disabled={creating}
           >
@@ -132,7 +158,7 @@ export default function WorkspacesPage() {
       <main className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-slate-500">Loading workspaces...</p>
+            <LoadingSpinner message="Loading workspaces..." size="lg" />
           </div>
         ) : workspaces.length === 0 && !showCreateForm ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
@@ -165,7 +191,7 @@ export default function WorkspacesPage() {
                     autoFocus
                   />
                   {error && (
-                    <p className="text-sm text-red-600">{error}</p>
+                    <ErrorBanner message={error} />
                   )}
                   <div className="flex items-center gap-2">
                     <button

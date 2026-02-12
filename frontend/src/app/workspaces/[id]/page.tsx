@@ -17,6 +17,8 @@ import {
   Info,
 } from "lucide-react";
 import DocumentCard from "@/components/DocumentCard";
+import ErrorBanner from "@/components/ui/ErrorBanner";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
@@ -57,6 +59,9 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
   const [sending, setSending] = useState(false);
   const [history, setHistory] = useState<ChatEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editingName, setEditingName] = useState("");
 
   useEffect(() => {
     const token = getToken();
@@ -178,6 +183,38 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
     }
   }
 
+  async function handleUpdateName() {
+    const trimmed = editingName.trim();
+    if (!trimmed || trimmed === workspaceName) {
+      setIsEditingName(false);
+      setEditingName("");
+      return;
+    }
+  
+    setError(null);
+    try {
+      const data = await apiFetch(`/api/workspaces/${workspaceId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: trimmed }),
+      });
+  
+      if (!data.success) {
+        throw new Error(data.error || "Failed to update workspace name");
+      }
+  
+      setWorkspaceName(trimmed);
+      setIsEditingName(false);
+      setEditingName("");
+    } catch (err: any) {
+      setError(err.message || "Failed to update workspace name");
+    }
+  }
+
+  function startEditingName() {
+    setEditingName(workspaceName);
+    setIsEditingName(true);
+  }
+  
   return (
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 text-slate-900">
       {/* Sidebar - Documents */}
@@ -212,10 +249,12 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {error && (
-            <p className="text-sm text-red-600 mb-2">{error}</p>
+            <ErrorBanner message={error} className="mb-2" />
           )}
           {loadingDocuments ? (
-            <p className="text-sm text-slate-500">Loading...</p>
+            <div className="flex items-center justify-center py-8">
+              <LoadingSpinner message="Loading documents..." size="sm" />
+            </div>
           ) : documents.length === 0 ? (
             <div className="text-center py-10 px-4">
               <div className="bg-slate-50 w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3">
@@ -255,9 +294,31 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
               <span className="text-sm font-medium">Workspaces</span>
             </button>
             <div className="h-4 w-px bg-slate-200" />
-            <h1 className="font-semibold text-slate-800 truncate max-w-[200px]">
-              {workspaceName || `Workspace #${workspaceId}`}
-            </h1>
+            {
+              isEditingName ? (
+                <input 
+                  type="text"
+                  value={editingName}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  onBlur={handleUpdateName}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleUpdateName();
+                    } else if (e.key === "Escape") {
+                      setIsEditingName(false);
+                      setEditingName("");
+                    }
+                  }}
+                  className="font-semibold text-slate-800 bg-white border border-indigo-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 max-w-[200px]"
+                  autoFocus
+                />
+              ) : (
+                <h1 className="font-semibold text-slate-800 truncate max-w-[200px] cursor-pointer hover:text-indigo-600 transition-colors"
+                 onClick={startEditingName}>
+                  {workspaceName || `Workspace #${workspaceId}`}
+                </h1>
+              )
+            }
           </div>
         </div>
 
@@ -265,7 +326,9 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
         <div className="flex-1 flex flex-col min-h-0 bg-slate-50/30">
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-8">
             {loadingHistory ? (
-              <p className="text-sm text-slate-500">Loading chat...</p>
+              <div className="flex items-center justify-center h-full">
+                <LoadingSpinner message="Loading chat..." size="md" />
+              </div>
             ) : history.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center max-w-lg mx-auto text-center space-y-6">
                 <div className="bg-indigo-600/10 p-6 rounded-3xl">
@@ -289,8 +352,8 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
             ) : (
               <div className="max-w-3xl mx-auto w-full space-y-6">
                 {history.map((entry) => (
-                  <>
-                    <div key={`q-${entry.id}`} className="flex gap-4 justify-end">
+                  <div key={entry.id} className="space-y-2">
+                    <div className="flex gap-4 justify-end">
                       <div className="flex gap-4 max-w-[85%] flex-row-reverse">
                         <div className="shrink-0 w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center">
                           <User size={16} />
@@ -300,7 +363,7 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
                         </div>
                       </div>
                     </div>
-                    <div key={`a-${entry.id}`} className="flex gap-4 justify-start">
+                    <div className="flex gap-4 justify-start">
                       <div className="flex gap-4 max-w-[85%]">
                         <div className="shrink-0 w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center">
                           <Bot size={16} />
@@ -310,7 +373,7 @@ export default function WorkspacePage({ params }: WorkspacePageProps) {
                         </div>
                       </div>
                     </div>
-                  </>
+                  </div>
                 ))}
                 {sending && (
                   <div className="flex gap-4 justify-start">

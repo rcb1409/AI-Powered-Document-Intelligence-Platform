@@ -81,6 +81,69 @@ router.post("/", authMiddleware, async (req: AuthenticatedRequest, res: Response
 });
 
 /**
+ * PATCH /api/workspaces/:workspaceId
+ * Update workspace name
+ * Body: { name: string }
+ */
+router.patch("/:workspaceId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Not authenticated" });
+    }
+
+    const workspaceId = Number(req.params.workspaceId);
+    const { name } = req.body;
+
+    if (!workspaceId || Number.isNaN(workspaceId)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid workspace id",
+      });
+    }
+
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: "name is required",
+      });
+    }
+
+    // Ensure workspace belongs to user
+    const check = await pool.query(
+      `SELECT id FROM workspaces WHERE id = $1 AND user_id = $2`,
+      [workspaceId, userId]
+    );
+
+    if (check.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Workspace not found",
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE workspaces 
+       SET name = $1 
+       WHERE id = $2 AND user_id = $3
+       RETURNING id, name, created_at`,
+      [name.trim(), workspaceId, userId]
+    );
+
+    return res.json({
+      success: true,
+      workspace: result.rows[0],
+    });
+  } catch (error: any) {
+    console.error("Error in PATCH /api/workspaces/:workspaceId:", error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || "Failed to update workspace",
+    });
+  }
+});
+
+/**
  * DELETE /api/workspaces/:workspaceId
  */
 router.delete("/:workspaceId", authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
